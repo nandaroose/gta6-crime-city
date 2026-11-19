@@ -36,14 +36,12 @@ export function drawMinimap(ctx, world, screenW, screenH) {
     for (let tx = Math.max(0, x0); tx <= Math.min(GRID - 1, x1); tx++) {
       const v = city.t(tx, ty);
       let color = null;
-      if (v === T.ROAD) color = '#3c4048';
-      else if (v === T.ROAD && city.isAvenueRow(ty)) color = '#4a4f58';
+      if (v === T.ROAD) color = city.isAvenueRow(ty) || city.isAvenueCol(tx) ? '#4a4f58' : '#3c4048';
       else if (v === T.SIDEWALK) color = '#20242b';
       else if (v === T.PARK) color = '#28402a';
       else if (v === T.SAND) color = '#4a422c';
       else if (v === T.EMPTY) color = '#12283a';
       else if (v === T.BUILDING) color = '#101216';
-      if (v === T.ROAD) color = city.isAvenueRow(ty) || city.isAvenueCol(tx) ? '#4a4f58' : '#3c4048';
       if (color) {
         ctx.fillStyle = color;
         ctx.fillRect(tx * TILE, ty * TILE, TILE + 1, TILE + 1);
