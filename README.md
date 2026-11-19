@@ -4,57 +4,66 @@
 [![rank](https://make.fun/badge/gta6-01/nandaroose/gta6-crime-city/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/nandaroose/gta6-crime-city/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-An entry for the [make.fun](https://make.fun) **gta6-01** bounty: a top-down open-world crime game written as plain HTML5 canvas and ES modules. No framework, no build step, no dependency, and nothing fetched over the network — every sprite is drawn, every sound is synthesised in the browser.
-
-## The game
-
-Solano City is a seeded city of roads, avenues, blocks, parks and a beach. You walk, sprint, aim, shoot, fight and drive; seven vehicle types share drift-heavy arcade physics, and any car can be carjacked. Traffic follows lanes, pedestrians wander and flee, horns spread panic, and running people down draws police attention. A five-star wanted system escalates from cruisers to foot pursuit. Pickups, melee, blood decals and a HUD with money, armour, weapon and a rotating minimap frame the action.
-
-A chain of eight story missions — each introduced by a phone call, driven by markers and timers, with fail states — gives the city a spine. Pause, a controls screen, settings and three save slots (plus autosave) live in localStorage, and WebAudio supplies engine pitch, gunshots, sirens and music. The city is deterministic from its seed, so the same seed builds the same streets.
+An open-world crime game for the browser. Solano City is a top-down city of blocks, roads and
+traffic where you walk, steal cars, fight pedestrians and police, raise a wanted level, and work
+through an eight-mission story to become the kingpin. It is plain HTML, CSS and JavaScript on a
+canvas, with no build step and no network calls at run time.
 
 ## Run it
 
-Serve the game folder locally:
+Play the game locally:
 
 ```
 node serve.ts
 ```
 
-Then open <http://localhost:8080/>. `serve.ts` is a tiny standard-library static server that only exposes `game/`; it needs no install and no build.
+The server hosts `game/` at http://localhost:8080. Open that page in desktop Chrome.
 
-To package the entry the way the grader expects (copy `game/` and `screenshots/`, write the dossier):
+To build the submission bundle instead:
 
 ```
 mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-`main.ts` runs directly on Node 22 — its TypeScript is erasable, so no flag and no build step are needed. Use `--repo DIR` and `--out DIR` to point it elsewhere; the output directory defaults to `$MAKEFUN_OUTPUT_DIR`, then `out/`.
+`main.ts` copies `game/` and `screenshots/` into the output directory, checks that
+`game/index.html` exists, refuses any `http` or `https` reference under `game/`, and writes
+`dossier.json` with `buildDossier` from `vendor/makefun-game.ts`.
 
-## Repository layout
+## Layout
 
-- `game/index.html` — the entry page, a single canvas.
-- `game/src/*.js` — the game's ES modules: config, utils, city generation, player, vehicles, traffic, pedestrians, police, wanted level, combat, particles, missions, story, HUD, minimap, menus, savegame, audio, camera, render and the main loop.
-- `screenshots/` — four captures of the running game; the first by name is the cover.
-- `shots.json` — the query strings used to stage those captures.
-- `main.ts` — packages `game/` and `screenshots/` into the output directory and writes `dossier.json` with `vendor/makefun-game.ts`.
-- `serve.ts` — local static server for playing the game.
-- `vendor/makefun-game.ts` — the kit's dossier library, unchanged.
+```
+game/              the playable game, served as static files
+  index.html       the page and canvas
+  src/             one module per system
+screenshots/       four renders of the game, the first by name the cover
+vendor/            makefun-game.ts, the dossier library
+main.ts            the entrypoint that builds the output
+serve.ts           a small local static server
+shots.json         how the screenshots were captured
+```
+
+The game's systems are split into `city`, `render`, `player`, `vehicles`, `traffic`, `peds`,
+`police`, `wanted`, `combat`, `missions`, `story`, `hud`, `minimap`, `camera`, `audio`,
+`particles`, `menus`, `savegame` and `utils`, all driven from `game/src/main.js`.
 
 ## Controls
 
-| Action | Key |
+| Input | Action |
 | --- | --- |
-| Move / drive | `W` `A` `S` `D` or arrow keys |
-| Sprint | `Shift` |
-| Aim | mouse |
-| Fire | left click |
-| Enter or jack a vehicle | `E` |
-| Melee attack (on foot) | `F` |
-| Handbrake (driving) | `Space` |
-| Select weapon | `1` `2` `3` `4` |
-| Toggle minimap | `M` |
-| Pause / menu | `Esc` |
+| W A S D / arrows | Move on foot, or throttle and steer in a vehicle |
+| Shift | Sprint |
+| Mouse | Aim |
+| Left click | Shoot or attack |
+| F / right click | Melee |
+| E | Enter or exit a vehicle |
+| 1 - 4 | Switch weapon: fists, pistol, SMG, shotgun |
+| Space | Handbrake in a vehicle |
+| M | Toggle the minimap |
+| Esc | Pause |
 
-## License
+Menus use the arrow keys or W/S to move, Enter or Space to choose, and Esc to go back.
 
-See `LICENSE`.
+## Saving
+
+Progress and settings are stored in the browser's `localStorage`, so a save survives a reload
+without a server.
