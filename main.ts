@@ -1,41 +1,138 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. Only the plumbing, not an open world: Block
-// Dodger, a plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a
-// title screen, score, lives and levels, game over and restart, flat colours and no sound. Build
-// your own open-world crime game in its place (three.js or any library you vendor under game/),
-// put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
-//
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
+interface Options {
+  repo: string;
+  out: string;
+}
+
+interface WalkedFile {
+  rel: string;
+  bytes: number;
+}
+
 const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+const BINARY_EXT = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp',
+  'woff', 'woff2', 'ttf', 'otf', 'eot',
+  'mp3', 'ogg', 'wav', 'flac', 'm4a',
+  'wasm', 'glb', 'gltf', 'bin', 'zip',
+]);
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files, in all, or a path under game/ over 1000 bytes: game/ counts beside /output's own 1000-entry cap, its
-// screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
+const REMOTE_URL = /https?:\/\//i;
+
+const USAGE = `Usage: node main.ts [--repo DIR] [--out DIR]
+
+  --repo DIR   repository to package (default: this file's directory)
+  --out DIR    output directory (default: $MAKEFUN_OUTPUT_DIR or out)
+
+Copies <repo>/game and <repo>/screenshots into the output directory and writes
+dossier.json there with vendor/makefun-game.ts.`;
+
+function parseArgs(argv: readonly string[]): Options {
+  let repo = here;
+  let out = process.env.MAKEFUN_OUTPUT_DIR ?? 'out';
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (arg === '--help' || arg === '-h') {
+      console.log(USAGE);
+      process.exit(0);
+    }
+    if (arg === '--repo' || arg === '-r') {
+      const value = argv[++i];
+      if (value === undefined) throw new Error('--repo needs a directory');
+      repo = value;
+      continue;
+    }
+    if (arg === '--out' || arg === '-o') {
+      const value = argv[++i];
+      if (value === undefined) throw new Error('--out needs a directory');
+      out = value;
+      continue;
+    }
+    throw new Error(`unknown argument: ${arg}`);
+  }
+
+  return { repo: resolve(repo), out: resolve(out) };
+}
+
+function walkFiles(root: string): WalkedFile[] {
+  const files: WalkedFile[] = [];
+  const visit = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) visit(full, rel);
+      else if (entry.isFile()) files.push({ rel, bytes: statSync(full).size });
+    }
+  };
+  visit(root, '');
+  return files;
+}
+
+function totalBytes(files: readonly WalkedFile[]): number {
+  return files.reduce((sum, file) => sum + file.bytes, 0);
+}
+
+function assertNoRemoteUrls(gameDir: string, files: readonly WalkedFile[]): void {
+  for (const file of files) {
+    const ext = file.rel.split('.').pop()?.toLowerCase() ?? '';
+    if (BINARY_EXT.has(ext)) continue;
+    const text = readFileSync(join(gameDir, file.rel), 'utf8');
+    if (REMOTE_URL.test(text)) {
+      throw new Error(`game/${file.rel} references an http(s) URL; the game must load nothing over the network`);
+    }
+  }
+}
+
+function humanBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function packageEntry(options: Options): void {
+  const gameDir = join(options.repo, 'game');
+  const shotsDir = join(options.repo, 'screenshots');
+
+  if (!existsSync(join(gameDir, 'index.html'))) {
+    throw new Error(`game/index.html is missing under ${options.repo}; a game is a directory of static files with its index.html at the root`);
+  }
+
+  const gameFiles = walkFiles(gameDir);
+  assertNoRemoteUrls(gameDir, gameFiles);
+  const shotFiles = existsSync(shotsDir) ? walkFiles(shotsDir) : [];
+
+  mkdirSync(options.out, { recursive: true });
+  cpSync(gameDir, join(options.out, 'game'), { recursive: true });
+  mkdirSync(join(options.out, 'screenshots'), { recursive: true });
+  if (existsSync(shotsDir)) cpSync(shotsDir, join(options.out, 'screenshots'), { recursive: true });
+
+  const dossier = buildDossier(options.out, {
     text_max_bytes: 163840,
     screenshots: { max: 4, max_bytes: 262144 },
     game_max_files: 993,
     game_max_bytes: 50331648,
     game_path_max_bytes: 1000,
-  }),
-);
+  });
+  writeFileSync(join(options.out, 'dossier.json'), dossier);
+
+  console.log(`repo:        ${options.repo}`);
+  console.log(`output:      ${options.out}`);
+  console.log(`game:        ${gameFiles.length} files, ${humanBytes(totalBytes(gameFiles))}`);
+  console.log(`screenshots: ${shotFiles.length} files, ${humanBytes(totalBytes(shotFiles))}`);
+  console.log(`dossier:     ${humanBytes(dossier.length)}`);
+  console.log('entry packaged.');
+}
+
+try {
+  packageEntry(parseArgs(process.argv.slice(2)));
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`make.fun gta6-01: ${message}`);
+  process.exitCode = 1;
+}
