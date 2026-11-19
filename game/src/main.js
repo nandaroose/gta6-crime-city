@@ -1,10 +1,11 @@
 // Solano City: boot, input, fixed-timestep loop and the game state machine.
 
-import { CONFIG, WEAPONS } from './config.js';
-import { dist, dist2 } from './utils.js';
+import { CONFIG, WEAPONS, CAR_TYPES } from './config.js';
+import { dist, dist2, rng } from './utils.js';
 import { City } from './city.js';
 import { Player } from './player.js';
-import { VehicleManager } from './vehicles.js';
+import { Vehicle, VehicleManager } from './vehicles.js';
+import { MISSIONS } from './story.js';
 import { Traffic } from './traffic.js';
 import { PedManager } from './peds.js';
 import { Police } from './police.js';
@@ -19,6 +20,11 @@ import { SaveGame } from './savegame.js';
 import { Audio } from './audio.js';
 import { Camera } from './camera.js';
 import { Renderer } from './render.js';
+
+const SHOT_SCENES = ['start', 'drive', 'chase', 'mission'];
+const shotParam = new URLSearchParams(location.search).get('shot');
+const shot = SHOT_SCENES.includes(shotParam) ? shotParam : null;
+if (shot) Math.random = rng(20260101);
 
 class EventBus {
   constructor() {
@@ -475,10 +481,97 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+function clearHudMessages() {
+  game.hud.notifications.length = 0;
+  game.hud.call = null;
+  game.hud.callTimer = 0;
+  game.hint = null;
+}
+
+function spawnTrafficCar(x, y, angle, typeIndex) {
+  const car = new Vehicle({ x, y, angle, type: CAR_TYPES[typeIndex % CAR_TYPES.length], driver: true });
+  game.vehicles.add(car);
+  return car;
+}
+
+function spawnCruiser(x, y, angle) {
+  const car = new Vehicle({
+    x,
+    y,
+    angle,
+    type: CAR_TYPES[6],
+    isPolice: true,
+    driver: true,
+    color: '#e9edf2',
+  });
+  car.ai = { police: true };
+  car.siren = true;
+  car.health = 140;
+  car.maxHealth = 140;
+  game.police.cruisers.push(car);
+  game.vehicles.add(car);
+  return car;
+}
+
+function applyShot(scene) {
+  if (!scene) return;
+  game.startNew();
+  clearHudMessages();
+
+  if (scene === 'start') {
+    const spot = game.city.walkableNear(game.city.landmarks.downtown.x, game.city.landmarks.downtown.y);
+    player.reset(spot.x, spot.y);
+    player.angle = -Math.PI / 2;
+    game.camera.snapTo(spot.x, spot.y);
+    return;
+  }
+
+  if (scene === 'drive') {
+    const laneY = game.city.roadY[1] + 32;
+    const x = game.city.roadX[2] + 140;
+    const car = new Vehicle({ x, y: laneY, angle: 0, type: CAR_TYPES[0], color: '#e2604f' });
+    game.vehicles.add(car);
+    player.reset(x, laneY);
+    player.enterVehicle(car, game);
+    spawnTrafficCar(x + 150, laneY, 0, 2);
+    spawnTrafficCar(x + 300, laneY, 0, 3);
+    spawnTrafficCar(x - 150, laneY - 64, Math.PI, 1);
+    spawnTrafficCar(x + 120, laneY - 64, Math.PI, 4);
+    spawnTrafficCar(game.city.roadX[2] + 32, laneY - 220, Math.PI / 2, 5);
+    game.camera.snapTo(car.x, car.y);
+    game.hint = 'F exit  ·  Space handbrake  ·  H horn';
+    return;
+  }
+
+  if (scene === 'chase') {
+    const spot = game.city.walkableNear(game.city.roadX[1] + 110, game.city.roadY[1] + 110);
+    player.reset(spot.x, spot.y);
+    player.invuln = 999;
+    player.angle = -Math.PI / 2;
+    game.wanted.set(3);
+    game.wanted.hold = true;
+    spawnCruiser(game.city.roadX[1], spot.y + 180, -Math.PI / 2);
+    spawnCruiser(game.city.roadX[1], spot.y + 330, -Math.PI / 2);
+    spawnCruiser(spot.x + 240, game.city.roadY[1], Math.PI);
+    game.camera.snapTo(spot.x, spot.y);
+    return;
+  }
+
+  if (scene === 'mission') {
+    const garage = game.city.landmarks.garage;
+    const spot = game.city.walkableNear(garage.x - 240, garage.y + 40);
+    player.reset(spot.x, spot.y);
+    game.camera.snapTo(spot.x, spot.y);
+    game.missions.start(MISSIONS[0], game);
+    game.hud.notifications.length = 0;
+  }
+}
+
 resetWorld();
 player.reset(spawnPoint().x, spawnPoint().y);
 populateCity();
 game.camera.snapTo(player.x, player.y);
 game.menus.showTitle();
+applyShot(shot);
 window.Solano = game;
 requestAnimationFrame(frame);
