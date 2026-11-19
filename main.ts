@@ -1,100 +1,104 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { buildDossier } from './vendor/makefun-game.ts';
 
+const HERE = fileURLToPath(new URL('.', import.meta.url));
+const NETWORK_URL = /https?:\/\//i;
 const CAPS = {
-  text_max_bytes: 163_840,
-  screenshots: { max: 4, max_bytes: 256 * 1024 },
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
   game_max_files: 993,
-  game_max_bytes: 48 * 1024 * 1024,
-  game_path_max_bytes: 1_000
+  game_max_bytes: 50331648,
+  game_path_max_bytes: 1000,
 };
 
-function parseArgs(argv: string[]): { repo: string; out: string } {
-  let repo = process.cwd();
-  let out = process.env.MAKEFUN_OUTPUT_DIR ?? 'out';
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === '--repo' || arg === '--out') {
-      const value = argv[i + 1];
-      if (value === undefined) throw new Error(`${arg} needs a value`);
-      if (arg === '--repo') repo = value;
-      else out = value;
-      i++;
-    } else if (arg.startsWith('--repo=')) {
-      repo = arg.slice('--repo='.length);
-    } else if (arg.startsWith('--out=')) {
-      out = arg.slice('--out='.length);
-    } else {
-      throw new Error(`unknown argument: ${arg}`);
-    }
-  }
-  return { repo: resolve(repo), out: resolve(out) };
+function fail(message: string): never {
+  console.error(`makefun: ${message}`);
+  process.exit(1);
 }
 
-function walk(dir: string): string[] {
+function parseCli(): { repo?: string; out?: string } {
+  try {
+    return parseArgs({
+      args: process.argv.slice(2),
+      options: {
+        repo: { type: 'string' },
+        out: { type: 'string' },
+      },
+    }).values;
+  } catch (err) {
+    return fail(`bad arguments: ${(err as Error).message}`);
+  }
+}
+
+function listFiles(dir: string): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...walk(path));
-    else if (entry.isFile()) files.push(path);
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...listFiles(full));
+    else if (entry.isFile()) files.push(full);
+    else fail(`not a regular file: ${full}`);
   }
   return files;
 }
 
-function copyTree(src: string, dest: string): { files: number; bytes: number } {
-  let files = 0;
-  let bytes = 0;
-  for (const path of walk(src)) {
-    const target = join(dest, path.slice(src.length + 1));
-    mkdirSync(dirname(target), { recursive: true });
-    cpSync(path, target);
-    files++;
-    bytes += statSync(path).size;
+const values = parseCli();
+const cwd = process.cwd();
+const repo = resolve(
+  values.repo ?? process.env.MAKEFUN_BOT_DIR ?? (existsSync(join(cwd, 'game')) ? cwd : HERE),
+);
+const out = resolve(
+  values.out ?? process.env.MAKEFUN_OUTPUT_DIR ?? (existsSync('/output') ? '/output' : 'out'),
+);
+
+const gameDir = join(repo, 'game');
+const shotsDir = join(repo, 'screenshots');
+
+if (!existsSync(gameDir)) fail(`no game/ directory under ${repo}`);
+if (!existsSync(join(gameDir, 'index.html'))) fail(`missing ${join(gameDir, 'index.html')}`);
+if (!existsSync(shotsDir)) fail(`no screenshots/ directory under ${repo}`);
+
+const gameFiles = listFiles(gameDir);
+for (const file of gameFiles) {
+  if (NETWORK_URL.test(readFileSync(file, 'utf8'))) {
+    fail(`network URL in ${relative(repo, file)}: game files must load nothing over the network`);
   }
-  return { files, bytes };
 }
 
-function run(): void {
-  const { repo, out } = parseArgs(process.argv.slice(2));
-  const gameDir = join(repo, 'game');
-  const shotsDir = join(repo, 'screenshots');
+const shotFiles = listFiles(shotsDir);
+const copied = [...gameFiles, ...shotFiles];
+const bytes = copied.reduce((total, file) => total + statSync(file).size, 0);
 
-  if (!existsSync(gameDir) || !statSync(gameDir).isDirectory()) {
-    throw new Error(`no game/ directory in ${repo}`);
-  }
-  const indexHtml = join(gameDir, 'index.html');
-  if (!existsSync(indexHtml) || !statSync(indexHtml).isFile()) {
-    throw new Error(`game/index.html is missing from ${repo}`);
-  }
-  if (!existsSync(shotsDir) || !statSync(shotsDir).isDirectory()) {
-    throw new Error(`no screenshots/ directory in ${repo}`);
-  }
-
-  for (const path of walk(gameDir)) {
-    if (/https?:\/\//i.test(readFileSync(path, 'utf8'))) {
-      throw new Error(`game file loads a network URL: ${path.slice(repo.length + 1)}`);
-    }
-  }
-
-  const dossier = buildDossier(repo, CAPS);
-
+try {
   mkdirSync(out, { recursive: true });
-  const game = copyTree(gameDir, join(out, 'game'));
-  const shots = copyTree(shotsDir, join(out, 'screenshots'));
-  writeFileSync(join(out, 'dossier.json'), dossier);
+  cpSync(gameDir, join(out, 'game'), { recursive: true });
+  cpSync(shotsDir, join(out, 'screenshots'), { recursive: true });
+} catch (err) {
+  fail(`copy failed: ${(err as Error).message}`);
+}
 
-  const files = game.files + shots.files + 1;
-  const bytes = game.bytes + shots.bytes + dossier.length;
-  console.log(`copied ${files} files, ${bytes} bytes to ${out}`);
-  console.log(`  game/: ${game.files} files, ${game.bytes} bytes`);
-  console.log(`  screenshots/: ${shots.files} files, ${shots.bytes} bytes`);
-  console.log(`  dossier.json: ${dossier.length} bytes`);
+let dossier: Uint8Array;
+try {
+  dossier = buildDossier(out, CAPS);
+} catch (err) {
+  fail((err as Error).message);
 }
 
 try {
-  run();
-} catch (error) {
-  console.error(`main.ts: ${(error as Error).message}`);
-  process.exit(1);
+  writeFileSync(join(out, 'dossier.json'), dossier);
+} catch (err) {
+  fail(`cannot write dossier.json: ${(err as Error).message}`);
 }
+
+console.log(`makefun: copied ${copied.length} files, ${bytes} bytes to ${out}`);
+console.log(`makefun: wrote ${join(out, 'dossier.json')} (${dossier.length} bytes)`);
