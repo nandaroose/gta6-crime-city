@@ -5,9 +5,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import { join, resolve } from 'node:path';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-type Args = { repo: string; out: string };
-
-function parseArgs(argv: string[]): Args {
+function parseArgs(argv) {
   let repo = process.cwd();
   let out = process.env.MAKEFUN_OUTPUT_DIR || 'out';
   for (let i = 0; i < argv.length; i++) {
@@ -30,8 +28,8 @@ function parseArgs(argv: string[]): Args {
   return { repo: resolve(repo), out: resolve(out) };
 }
 
-function walk(dir: string, base = dir): { path: string; bytes: number }[] {
-  const out: { path: string; bytes: number }[] = [];
+function walk(dir, base = dir) {
+  const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...walk(full, base));
@@ -41,7 +39,7 @@ function walk(dir: string, base = dir): { path: string; bytes: number }[] {
   return out;
 }
 
-function scanForUrls(gameDir: string): void {
+function scanForUrls(gameDir) {
   for (const file of walk(gameDir)) {
     const text = readFileSync(join(gameDir, file.path), 'utf8');
     if (/https?:\/\//i.test(text)) {
@@ -50,7 +48,7 @@ function scanForUrls(gameDir: string): void {
   }
 }
 
-function main(): void {
+function main() {
   const args = parseArgs(process.argv.slice(2));
   const gameDir = join(args.repo, 'game');
   const shotsDir = join(args.repo, 'screenshots');
