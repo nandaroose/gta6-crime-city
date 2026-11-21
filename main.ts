@@ -5,8 +5,16 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import { join, resolve } from 'node:path';
 import { buildDossier } from './vendor/makefun-game.ts';
 
+function defaultRepo() {
+  const env = process.env.MAKEFUN_BOT_DIR;
+  if (env) return env;
+  if (existsSync(join(process.cwd(), 'game'))) return process.cwd();
+  if (existsSync(join(import.meta.dirname, 'game'))) return import.meta.dirname;
+  return process.cwd();
+}
+
 function parseArgs(argv) {
-  let repo = process.env.MAKEFUN_BOT_DIR || process.cwd();
+  let repo = defaultRepo();
   let out = process.env.MAKEFUN_OUTPUT_DIR || 'out';
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
