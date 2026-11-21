@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 function parseArgs(argv) {
-  let repo = process.cwd();
+  let repo = process.env.MAKEFUN_BOT_DIR || process.cwd();
   let out = process.env.MAKEFUN_OUTPUT_DIR || 'out';
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
